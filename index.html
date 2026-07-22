@@ -22,7 +22,7 @@
       </div>
     </div>
     <p class="masthead__sub">Daily news aggregated and compiled · review <a href="https://github.com/kalistampai/news-aggregator/blob/main/pipeline/feeds.txt" target="_blank" rel="noopener noreferrer">news sources</a> to make updates</p>
-    
+
     <div class="masthead__archive" id="archiveBar" hidden>
       <span class="archive__label">// log</span>
       <button class="archive__nav" id="prevDay" title="Older day" aria-label="Older day">◄</button>
@@ -32,6 +32,15 @@
       <button class="archive__nav" id="nextDay" title="Newer day" aria-label="Newer day">►</button>
       <button class="archive__latest" id="latestBtn" title="Jump to latest">latest</button>
       <span class="archive__count" id="archiveCount"></span>
+    </div>
+
+    <div class="masthead__search" id="searchBar" hidden>
+      <span class="search__label">// filter</span>
+      <input type="search" class="search__input" id="searchInput"
+             placeholder="Keyword search (title, source, reasoning, bullets)…"
+             aria-label="Filter news items by keyword" autocomplete="off" spellcheck="false" />
+      <button class="search__clear" id="searchClear" title="Clear filter (Esc)" hidden>clear</button>
+      <span class="search__count" id="searchCount"></span>
     </div>
 
     <div class="masthead__stats" id="statBar" hidden>
