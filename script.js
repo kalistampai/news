@@ -1,7 +1,7 @@
 /* DISPATCH — reads the briefing, its dated archives, and the feed health reports
    from a GitHub Gist and renders the board. Read-only: no token in the browser.
-   A single API call pulls every day at once, so flipping between archived days
-   (or opening the health panel) makes no further requests. */
+   A single API call pulls every day at once, so flipping between archived days,
+   filtering, or opening the health panel makes no further requests. */
 
 /* ============================ CONFIG — EDIT GIST_ID ======================== */
 const CONFIG = {
@@ -30,6 +30,7 @@ const REPORT_RE = /^feedreport-(\d{4}-\d{2}-\d{2})\.json$/;
 
 let STORE = { dates: [], byDate: {}, reports: {} };   // dates sorted newest-first
 let currentIndex = 0;
+let QUERY = "";                                       // active filter, persists across days
 
 /* ------------------------------- time ------------------------------------ */
 /* Source timestamps are UTC ISO-8601 (editor.py writes datetime.now(timezone.utc)).
@@ -125,6 +126,73 @@ async function buildStore(gist) {
   return { dates, byDate, reports };
 }
 
+/* -------------------------------- search --------------------------------- */
+/* Multi-term AND matching. "cve linux" matches items containing BOTH, in any
+   field. Purely client-side over the already-loaded day — no extra requests. */
+function tokens(q) {
+  return String(q || "").toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+function cardHaystack(item) {
+  return [item.title, item.source, item.reasoning, ...(item.bullets || [])]
+    .join(" ").toLowerCase();
+}
+
+function notableHaystack(item) {
+  return [item.title, item.source].join(" ").toLowerCase();
+}
+
+function matchesAll(hay, toks) {
+  return toks.every((t) => hay.includes(t));
+}
+
+/* Returns a briefing-shaped object containing only matching items. */
+function filterBriefing(data, query) {
+  const toks = tokens(query);
+  const cats = data.categories || {};
+  const notable = data.also_notable || [];
+  const totalFeat = Object.values(cats).reduce((n, v) => n + (v?.length || 0), 0);
+  const totalNote = notable.length;
+
+  if (!toks.length) {
+    return { data, active: false, totalFeat, totalNote,
+             matchFeat: totalFeat, matchNote: totalNote };
+  }
+
+  const outCats = {};
+  let matchFeat = 0;
+  for (const [name, items] of Object.entries(cats)) {
+    const keep = (items || []).filter((it) => matchesAll(cardHaystack(it), toks));
+    if (keep.length) { outCats[name] = keep; matchFeat += keep.length; }
+  }
+  const outNote = notable.filter((it) => matchesAll(notableHaystack(it), toks));
+
+  return {
+    data: { ...data, categories: outCats, also_notable: outNote },
+    active: true, totalFeat, totalNote,
+    matchFeat, matchNote: outNote.length,
+  };
+}
+
+function syncSearchUI(res) {
+  const countEl = $("#searchCount");
+  const clearEl = $("#searchClear");
+  clearEl.hidden = !res.active;
+  countEl.textContent = res.active
+    ? `${res.matchFeat}/${res.totalFeat} features · ${res.matchNote}/${res.totalNote} notable`
+    : "";
+  countEl.dataset.empty = String(res.active && !res.matchFeat && !res.matchNote);
+}
+
+function applyFilter() {
+  const dates = STORE.dates;
+  if (!dates.length) return;
+  const data = STORE.byDate[dates[currentIndex]];
+  const res = filterBriefing(data, QUERY);
+  render(res.data, res);
+  syncSearchUI(res);
+}
+
 /* --------------------------- archive navigator --------------------------- */
 function syncArchiveUI() {
   const { dates } = STORE;
@@ -153,10 +221,10 @@ function syncArchiveUI() {
 }
 
 function showIndex(i) {
-  const { dates, byDate } = STORE;
+  const { dates } = STORE;
   if (i < 0 || i >= dates.length) return;
   currentIndex = i;
-  render(byDate[dates[i]]);
+  applyFilter();                 // renders the day through the active filter
   renderHealth(dates[i]);
   syncArchiveUI();
   window.scrollTo({ top: 0, behavior: "smooth" });
@@ -215,6 +283,10 @@ function deltaBlock(title, cls, rows, fmt) {
     rows.map((r) => `<li>${fmt(r)}</li>`).join("") + "</ul></div>";
 }
 
+function hostOf(u) {
+  try { return new URL(u).hostname.replace("www.", ""); } catch (_) { return u; }
+}
+
 function renderHealth(date) {
   const panel = $("#healthPanel");
   const report = STORE.reports[date];
@@ -245,11 +317,8 @@ function renderHealth(date) {
     tag.hidden = true;
   }
 
-  // day-over-day changes
-  const host = (u) => { try { return new URL(u).hostname.replace("www.", ""); }
-                        catch (_) { return u; } };
   const line = (r) =>
-    `<code>${escapeHtml(host(r.url))}</code> <span class="arrow">` +
+    `<code>${escapeHtml(hostOf(r.url))}</code> <span class="arrow">` +
     `${escapeHtml(r.from || "—")} → ${escapeHtml(r.to || "—")}</span>`;
 
   let deltaHtml = "";
@@ -259,10 +328,10 @@ function renderHealth(date) {
       deltaBlock("Recovered since " + prevDate, "good", deltas.recovered, line) +
       deltaBlock("Changed failure mode", "warn", deltas.changed, line) +
       deltaBlock("New sources", "info", deltas.added,
-                 (r) => `<code>${escapeHtml(host(r.url))}</code> ` +
+                 (r) => `<code>${escapeHtml(hostOf(r.url))}</code> ` +
                         `<span class="arrow">${escapeHtml(r.to)}</span>`) +
       deltaBlock("Removed from feeds.txt", "info", deltas.removed,
-                 (r) => `<code>${escapeHtml(host(r.url))}</code>`);
+                 (r) => `<code>${escapeHtml(hostOf(r.url))}</code>`);
     if (!deltaHtml) {
       deltaHtml = `<p class="delta__none">No status changes since ${escapeHtml(prevDate)}.</p>`;
     }
@@ -272,7 +341,6 @@ function renderHealth(date) {
   }
   $("#healthDeltas").innerHTML = deltaHtml;
 
-  // grouped current failures
   const groups = {};
   sources.filter((s) => s.status !== "OK")
          .forEach((s) => { (groups[s.status] ||= []).push(s); });
@@ -290,7 +358,7 @@ function renderHealth(date) {
           <ul class="hgroup__list">
             ${groups[st].map((s) => `<li>
                 <a href="${escapeHtml(s.url)}" target="_blank" rel="noopener noreferrer">
-                  ${escapeHtml(s.source || host(s.url))}</a>
+                  ${escapeHtml(s.source || hostOf(s.url))}</a>
                 ${s.detail ? `<span class="hgroup__detail">${escapeHtml(s.detail)}</span>` : ""}
               </li>`).join("")}
           </ul>
@@ -379,7 +447,7 @@ function renderNotable(items) {
   return wrap;
 }
 
-function render(data) {
+function render(data, filterRes) {
   board.innerHTML = "";
   const cats = data.categories || {};
   const catNames = Object.keys(cats).filter((k) => cats[k]?.length);
@@ -394,7 +462,14 @@ function render(data) {
   if (notable.length) board.appendChild(renderNotable(notable));
 
   if (!catNames.length && !notable.length) {
-    board.innerHTML = `<div class="state">No items in this briefing.</div>`;
+    board.innerHTML = filterRes && filterRes.active
+      ? `<div class="state">No items match <b>${escapeHtml(QUERY)}</b>.
+           <button class="state__reset" id="stateReset">clear filter</button></div>`
+      : `<div class="state">No items in this briefing.</div>`;
+    const reset = $("#stateReset");
+    if (reset) reset.addEventListener("click", () => {
+      $("#searchInput").value = ""; QUERY = ""; applyFilter();
+    });
   }
 
   // header meta
@@ -413,6 +488,7 @@ function render(data) {
     gen.textContent = ""; gen.title = "";
   }
   $("#statBar").hidden = false;
+  $("#searchBar").hidden = false;
 }
 
 function renderError(msg) {
@@ -439,6 +515,21 @@ function escapeHtml(s) {
     $("#prevDay").addEventListener("click", () => showIndex(currentIndex + 1));
     $("#nextDay").addEventListener("click", () => showIndex(currentIndex - 1));
     $("#latestBtn").addEventListener("click", () => showIndex(0));
+
+    const input = $("#searchInput");
+    input.addEventListener("input", (e) => { QUERY = e.target.value; applyFilter(); });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { input.value = ""; QUERY = ""; applyFilter(); input.blur(); }
+    });
+    $("#searchClear").addEventListener("click", () => {
+      input.value = ""; QUERY = ""; applyFilter(); input.focus();
+    });
+    // "/" focuses the filter from anywhere on the page.
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "/" && document.activeElement !== input) {
+        e.preventDefault(); input.focus();
+      }
+    });
 
     const toggle = $("#healthToggle"), body = $("#healthBody");
     toggle.addEventListener("click", () => {
