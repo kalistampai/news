@@ -19,10 +19,10 @@ const CONFIG = {
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const board = $("#board");
-const ARCHIVE_RE = /^briefing-(\d{4}-\d{2}-\d{2})\.json$/;
 
 let STORE = { dates: [], byDate: {} };   // dates sorted newest-first
 let currentIndex = 0;
+let currentData = null;                  // holds the active day's raw data for filtering
 
 /* ------------------------------ data loading ----------------------------- */
 async function fetchGist() {
@@ -59,12 +59,19 @@ function buildStore(gist) {
   }
 
   const files = gist.files || {};
-  for (const [name, file] of Object.entries(files)) {   // dated archive files
-    const m = name.match(ARCHIVE_RE);
-    if (!m) continue;
+  for (const [name, file] of Object.entries(files)) {
+    if (!name.endsWith(".json")) continue;       // scan all json files safely
     const data = parseFile(file);
-    if (data) byDate[m[1]] = data;
+    if (!data) continue;
+
+    // Use internal date property first, otherwise extract YYYY-MM-DD from filename
+    const dateMatch = name.match(/(\d{4}-\d{2}-\d{2})/);
+    const key = data.date || (dateMatch ? dateMatch[1] : (name === CONFIG.LATEST_FILE ? "latest" : null));
+    if (key) {
+      byDate[key] = data;
+    }
   }
+
   const latest = parseFile(files[CONFIG.LATEST_FILE]);   // ensure newest is present
   if (latest) {
     const key = latest.date || "latest";
@@ -101,7 +108,12 @@ function showIndex(i) {
   const { dates, byDate } = STORE;
   if (i < 0 || i >= dates.length) return;
   currentIndex = i;
-  render(byDate[dates[i]]);
+  currentData = byDate[dates[i]];
+  
+  // Clear any active search query when changing dates
+  if ($("#searchInput")) $("#searchInput").value = "";
+  
+  render(currentData);
   syncArchiveUI();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -119,26 +131,34 @@ function buildMeter(score) {
   return frag;
 }
 
-function renderCard(item) {
+function highlightText(text, query) {
+  const safeText = escapeHtml(text || "");
+  if (!query) return safeText;
+  const escapedQ = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(`(${escapedQ})`, "gi");
+  return safeText.replace(regex, '<mark class="highlight">$1</mark>');
+}
+
+function renderCard(item, query = "") {
   const node = $("#cardTpl").content.cloneNode(true);
   const score = typeof item.score === "number" ? item.score : 8;
 
   $(".meter", node).appendChild(buildMeter(score));
-  $(".card__src", node).textContent = item.source || "";
+  $(".card__src", node).innerHTML = highlightText(item.source || "", query);
   const scoreEl = $(".card__score", node);
   scoreEl.textContent = `${score}/10`;
   if (score >= 9) scoreEl.classList.add("hot");
 
   const titleLink = $(".card__title a", node);
-  titleLink.textContent = item.title || "Untitled";
+  titleLink.innerHTML = highlightText(item.title || "Untitled", query);
   titleLink.href = item.url || "#";
 
-  $(".card__why", node).textContent = item.reasoning || "";
+  $(".card__why", node).innerHTML = highlightText(item.reasoning || "", query);
 
   const ul = $(".card__bullets", node);
   (item.bullets || []).forEach((b) => {
     const li = document.createElement("li");
-    li.textContent = b;
+    li.innerHTML = highlightText(b, query);
     ul.appendChild(li);
   });
 
@@ -146,7 +166,7 @@ function renderCard(item) {
   return node;
 }
 
-function renderCategory(name, items) {
+function renderCategory(name, items, query = "") {
   const section = document.createElement("section");
   section.className = "category";
   const head = document.createElement("div");
@@ -155,11 +175,11 @@ function renderCategory(name, items) {
     `<span class="slash">//</span><h2>${escapeHtml(name)}</h2>` +
     `<span class="rule"></span><span class="count">[${items.length}]</span>`;
   section.appendChild(head);
-  items.forEach((it) => section.appendChild(renderCard(it)));
+  items.forEach((it) => section.appendChild(renderCard(it, query)));
   return section;
 }
 
-function renderNotable(items) {
+function renderNotable(items, query = "") {
   const wrap = document.createElement("section");
   wrap.className = "notable";
   wrap.innerHTML = `<h3 class="notable__head">// Also notable</h3>`;
@@ -171,30 +191,61 @@ function renderNotable(items) {
     a.href = it.url || "#";
     a.target = "_blank"; a.rel = "noopener noreferrer";
     a.innerHTML =
-      `<span class="notable__src">${escapeHtml(it.source || "")}</span>` +
-      `<span class="notable__ttl">${escapeHtml(it.title || "")}</span>`;
+      `<span class="notable__src">${highlightText(it.source || "", query)}</span>` +
+      `<span class="notable__ttl">${highlightText(it.title || "", query)}</span>`;
     list.appendChild(a);
   });
   wrap.appendChild(list);
   return wrap;
 }
 
-function render(data) {
+function render(data, query = "") {
   board.innerHTML = "";
-  const cats = data.categories || {};
-  const catNames = Object.keys(cats).filter((k) => cats[k]?.length);
+  const q = query.trim().toLowerCase();
+  
+  // Filter categories by search keyword
+  const origCats = data.categories || {};
+  const filteredCats = {};
   let featTotal = 0;
 
-  catNames.forEach((name) => {
-    featTotal += cats[name].length;
-    board.appendChild(renderCategory(name, cats[name]));
+  Object.keys(origCats).forEach((name) => {
+    const items = origCats[name].filter((it) => {
+      if (!q) return true;
+      const inTitle = (it.title || "").toLowerCase().includes(q);
+      const inSrc = (it.source || "").toLowerCase().includes(q);
+      const inWhy = (it.reasoning || "").toLowerCase().includes(q);
+      const inBullets = (it.bullets || []).some((b) => String(b).toLowerCase().includes(q));
+      return inTitle || inSrc || inWhy || inBullets;
+    });
+    if (items.length) {
+      filteredCats[name] = items;
+      featTotal += items.length;
+    }
   });
 
-  const notable = data.also_notable || [];
-  if (notable.length) board.appendChild(renderNotable(notable));
+  // Filter notable items by search keyword
+  const origNotable = data.also_notable || [];
+  const filteredNotable = origNotable.filter((it) => {
+    if (!q) return true;
+    return (it.title || "").toLowerCase().includes(q) || (it.source || "").toLowerCase().includes(q);
+  });
 
-  if (!catNames.length && !notable.length) {
-    board.innerHTML = `<div class="state">No items in this briefing.</div>`;
+  const catNames = Object.keys(filteredCats);
+
+  catNames.forEach((name) => {
+    board.appendChild(renderCategory(name, filteredCats[name], q));
+  });
+
+  if (filteredNotable.length) {
+    board.appendChild(renderNotable(filteredNotable, q));
+  }
+
+  if (!catNames.length && !filteredNotable.length) {
+    if (q) {
+      board.innerHTML = `<div class="state"><p>No items matching "<b>${escapeHtml(query)}</b>".</p></div>`;
+    } else {
+      board.innerHTML = `<div class="state">No items in this briefing.</div>`;
+    }
   }
 
   // header meta
@@ -202,15 +253,30 @@ function render(data) {
   tag.textContent = "LIVE"; tag.dataset.state = "live";
   $("#dateStamp").textContent = data.date || "";
   $("#featCount").textContent = featTotal;
-  $("#notableCount").textContent = notable.length;
+  $("#notableCount").textContent = filteredNotable.length;
   $("#catCount").textContent = catNames.length;
+  
   if (data.generated_at) {
-    $("#genStamp").textContent =
-      "compiled " + new Date(data.generated_at).toUTCString().replace("GMT", "UTC");
+    const dt = new Date(data.generated_at);
+    const pstString = dt.toLocaleString("en-US", {
+      timeZone: "America/Los_Angeles",
+      weekday: "short",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+      timeZoneName: "short"
+    }).replace(/,/g, "");
+    $("#genStamp").textContent = "compiled " + pstString;
   } else {
     $("#genStamp").textContent = "";
   }
+  
   $("#statBar").hidden = false;
+  $("#searchBar").hidden = false;
 }
 
 function renderError(msg) {
@@ -236,6 +302,10 @@ function escapeHtml(s) {
     $("#prevDay").addEventListener("click", () => showIndex(currentIndex + 1));
     $("#nextDay").addEventListener("click", () => showIndex(currentIndex - 1));
     $("#latestBtn").addEventListener("click", () => showIndex(0));
+    
+    $("#searchInput").addEventListener("input", (e) => {
+      if (currentData) render(currentData, e.target.value);
+    });
 
     showIndex(0);
   } catch (e) {
