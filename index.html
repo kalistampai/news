@@ -21,7 +21,7 @@
         <time class="stamp" id="dateStamp">—</time>
       </div>
     </div>
-    <p class="masthead__sub">Daily news aggregated and compiled · review <a href="https://github.com/kalistampai/news-aggregator/blob/main/pipeline/feeds.txt" target="_blank" rel="noopener noreferrer">news sources</a> to make updates</p>
+    <p class="masthead__sub">Daily news aggregated and compiled · review sources to make updates</p>
 
     <div class="masthead__archive" id="archiveBar" hidden>
       <span class="archive__label">// log</span>
@@ -31,11 +31,7 @@
       </span>
       <button class="archive__nav" id="nextDay" title="Newer day" aria-label="Newer day">►</button>
       <button class="archive__latest" id="latestBtn" title="Jump to latest">latest</button>
-    </div>
-
-    <div class="masthead__search" id="searchBar" hidden>
-      <span class="search__label">// filter</span>
-      <input type="search" class="search__input" id="searchInput" placeholder="Keyword search (title, source, reasoning, bullets)..." aria-label="Filter news items by keyword" />
+      <span class="archive__count" id="archiveCount"></span>
     </div>
 
     <div class="masthead__stats" id="statBar" hidden>
@@ -48,6 +44,21 @@
       <span class="stamp" id="genStamp">—</span>
     </div>
   </header>
+
+  <!-- Feed health: collapsed to one line; expands to the full source report. -->
+  <section class="health" id="healthPanel" hidden>
+    <button class="health__toggle" id="healthToggle" aria-expanded="false" aria-controls="healthBody">
+      <span class="health__dot" id="healthDot" aria-hidden="true"></span>
+      <span class="health__headline" id="healthHeadline">Feed health</span>
+      <span class="health__delta" id="healthDeltaTag" hidden></span>
+      <span class="health__chev" aria-hidden="true">▾</span>
+    </button>
+    <div class="health__body" id="healthBody" hidden>
+      <div class="health__deltas" id="healthDeltas"></div>
+      <div class="health__groups" id="healthGroups"></div>
+      <p class="health__foot" id="healthFoot"></p>
+    </div>
+  </section>
 
   <main id="board" class="board" aria-live="polite">
     <div class="state" id="loadingState">
