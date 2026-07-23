@@ -17,6 +17,12 @@
   --sans: "IBM Plex Sans", system-ui, sans-serif;
   --display: "Space Grotesk", system-ui, sans-serif;
   --maxw: 940px;
+
+  /* BUILD STAMP — read back by script.js via getComputedStyle. If this string
+     does not match BUILD in script.js, the browser/CDN is serving a stale
+     style.css and the page says so out loud instead of failing silently.
+     Bump this together with ?v=, data-build, and BUILD. */
+  --build: "2026-07-22h";
 }
 
 * { box-sizing: border-box; }
@@ -355,8 +361,9 @@ body {
    ANY author `display` declaration outranks it, so a bare
    `.category__body { display: block; }` alone silently defeats the attribute. */
 .category__body { display: block; }
-.category__body[hidden] { display: none; }
-.category[data-collapsed="true"] .category__body { display: none; }
+.category__body[hidden] { display: none !important; }
+.category[data-collapsed="true"] .category__body { display: none !important; }
+.category[data-collapsed="true"] > .category__body { display: none !important; }
 
 /* Sticky lives on the HEADING wrapper, not on the clickable button.
    z-index is raised so a header that has scrolled up can never be covered by
@@ -403,10 +410,14 @@ body {
   background: var(--surface);
   color: var(--accent); font-family: var(--mono); font-size: .8rem; line-height: 1;
   /* transform is set INLINE by paintCategory so the arrow can never disagree
-     with the body. Only the animation and the colour shift live here. */
+     with the body. These two rules are the fallback and they are keyed to the
+     SAME data-collapsed attribute the body is keyed to — so if the inline style
+     is ever missing, the arrow still cannot lie about the state. */
+  transform: rotate(90deg);
   transition: transform .2s ease, border-color .15s, color .15s, background .15s;
 }
 .category[data-collapsed="true"] .category__chev {
+  transform: rotate(0deg);
   border-color: var(--accent-dim); background: var(--bg-2);
 }
 
@@ -556,4 +567,33 @@ body {
   *, *::before, *::after { animation: none !important; transition: none !important; }
   .scanline { display: none; }
   .category__chev { transition: none !important; }
+}
+
+/* ---------- stale-asset banner ---------- */
+/* Injected by script.js only when index.html / script.js / style.css disagree
+   about the build string. That mismatch is the single actual cause of the
+   "arrow moves but nothing collapses" symptom: a cached style.css carrying the
+   chevron rule without the matching hide rule. Making it visible turns a silent
+   CSS-versioning bug into a one-line instruction. */
+.stalebar {
+  position: sticky; top: 0; z-index: 200;
+  display: block; width: 100%;
+  padding: .6rem 1rem;
+  background: var(--hot); color: #12060a;
+  font-family: var(--mono); font-size: .7rem; letter-spacing: .04em;
+  text-align: center; border: none; cursor: pointer;
+}
+.stalebar b { font-weight: 700; }
+
+/* ---------- touch devices ---------- */
+/* :hover states latch on touch screens — a tapped header keeps the hover
+   background and accent chevron until you tap elsewhere, which reads as
+   "stuck open". Confine every hover rule to devices that really hover. */
+@media (hover: none) {
+  .category__toggle:hover { background: var(--bg); }
+  .category__toggle:hover .category__name { color: var(--accent); }
+  .category__toggle:hover .category__chev { border-color: var(--line); color: var(--accent); }
+  .category[data-collapsed="true"] .category__toggle:hover .category__chev {
+    border-color: var(--accent-dim);
+  }
 }
