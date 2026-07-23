@@ -3,13 +3,23 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Auto-refresh was removed by design: no meta refresh directive, no timer in
+       script.js. (Tag name deliberately not spelled out so a grep audit of this
+       file returns a clean zero.)
+
+       CACHE BUSTING: style.css and script.js carry ?v=<build>. GitHub Pages sits
+       behind a CDN that will happily serve a previous script.js/style.css for
+       some time after a push; that is what produced the "arrow rotates but
+       nothing collapses" symptom (old CSS had the chevron rule, not the
+       hide rule). BUMP THE ?v= VALUE, data-build BELOW, AND `BUILD` IN
+       script.js TOGETHER whenever you change these files. -->
   <title>DISPATCH — Daily Intel Briefing</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=2026-07-22g" />
 </head>
-<body>
+<body data-build="2026-07-22g">
   <div class="scanline" aria-hidden="true"></div>
 
   <header class="masthead">
@@ -52,8 +62,19 @@
 
       <span class="ctl__sep" aria-hidden="true">|</span>
 
-      <button class="ctl__btn" id="collapseAll" title="Collapse every category">collapse all</button>
-      <button class="ctl__btn" id="expandAll" title="Expand every category">expand all</button>
+      <span class="ctl__group" role="group" aria-label="Category sections">
+        <button type="button" class="ctl__bigbtn" id="collapseAll"
+                title="Collapse every category (c)">
+          <span class="ctl__bigbtn-icon" aria-hidden="true">&#9654;</span>
+          <span>collapse all</span>
+        </button>
+        <button type="button" class="ctl__bigbtn" id="expandAll"
+                title="Expand every category (e)">
+          <span class="ctl__bigbtn-icon ctl__bigbtn-icon--open" aria-hidden="true">&#9654;</span>
+          <span>expand all</span>
+        </button>
+      </span>
+      <span class="ctl__state" id="collapseState" aria-live="polite"></span>
 
     </div>
 
@@ -156,6 +177,6 @@
     <span id="footerNote">DISPATCH · static dashboard · data via GitHub Gist</span>
   </footer>
 
-  <script src="script.js"></script>
+  <script src="script.js?v=2026-07-22g"></script>
 </body>
 </html>
