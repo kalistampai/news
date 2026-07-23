@@ -18,7 +18,6 @@
       <div class="masthead__meta">
         <span class="tag" id="statusTag">BOOTING</span>
         <span class="flag" id="archiveFlag" hidden>ARCHIVED</span>
-        <span class="flag flag--new" id="newFlag" hidden>NEW BRIEFING</span>
         <time class="stamp" id="dateStamp">—</time>
       </div>
     </div>
@@ -56,20 +55,6 @@
       <button class="ctl__btn" id="collapseAll" title="Collapse every category">collapse all</button>
       <button class="ctl__btn" id="expandAll" title="Expand every category">expand all</button>
 
-      <span class="ctl__sep" aria-hidden="true">|</span>
-
-      <label class="ctl__toggle">
-        <input type="checkbox" id="autoRefresh" />
-        <span>auto-refresh</span>
-      </label>
-      <select class="ctl__select" id="refreshEvery" aria-label="Auto-refresh interval">
-        <option value="5">5m</option>
-        <option value="15" selected>15m</option>
-        <option value="30">30m</option>
-        <option value="60">60m</option>
-      </select>
-      <button class="ctl__btn" id="refreshNow" title="Check the Gist for a new briefing now">refresh now</button>
-      <span class="ctl__stamp" id="refreshStamp"></span>
     </div>
 
     <div class="masthead__stats" id="statBar" hidden>
