@@ -18,6 +18,7 @@
       <div class="masthead__meta">
         <span class="tag" id="statusTag">BOOTING</span>
         <span class="flag" id="archiveFlag" hidden>ARCHIVED</span>
+        <span class="flag flag--new" id="newFlag" hidden>NEW BRIEFING</span>
         <time class="stamp" id="dateStamp">—</time>
       </div>
     </div>
@@ -43,6 +44,34 @@
       <span class="search__count" id="searchCount"></span>
     </div>
 
+    <div class="masthead__controls" id="controlBar" hidden>
+      <span class="ctl__label">// score</span>
+      <input type="range" class="ctl__range" id="scoreRange" min="0" max="10" step="1" value="0"
+             aria-label="Minimum relevance score" />
+      <span class="ctl__value" id="scoreValue">all</span>
+      <button class="ctl__btn" id="scoreReset" title="Reset score threshold" hidden>reset</button>
+
+      <span class="ctl__sep" aria-hidden="true">|</span>
+
+      <button class="ctl__btn" id="collapseAll" title="Collapse every category">collapse all</button>
+      <button class="ctl__btn" id="expandAll" title="Expand every category">expand all</button>
+
+      <span class="ctl__sep" aria-hidden="true">|</span>
+
+      <label class="ctl__toggle">
+        <input type="checkbox" id="autoRefresh" />
+        <span>auto-refresh</span>
+      </label>
+      <select class="ctl__select" id="refreshEvery" aria-label="Auto-refresh interval">
+        <option value="5">5m</option>
+        <option value="15" selected>15m</option>
+        <option value="30">30m</option>
+        <option value="60">60m</option>
+      </select>
+      <button class="ctl__btn" id="refreshNow" title="Check the Gist for a new briefing now">refresh now</button>
+      <span class="ctl__stamp" id="refreshStamp"></span>
+    </div>
+
     <div class="masthead__stats" id="statBar" hidden>
       <span><b id="featCount">0</b> features</span>
       <span class="dot">·</span>
@@ -66,6 +95,52 @@
       <div class="health__deltas" id="healthDeltas"></div>
       <div class="health__groups" id="healthGroups"></div>
       <p class="health__foot" id="healthFoot"></p>
+    </div>
+  </section>
+
+  <!-- Source leaderboard: which feeds actually earn their place. -->
+  <section class="health" id="boardPanel" hidden>
+    <button class="health__toggle" id="boardToggle" aria-expanded="false" aria-controls="boardBody">
+      <span class="health__dot" data-level="good" aria-hidden="true"></span>
+      <span class="health__headline" id="boardHeadline">Source leaderboard</span>
+      <span class="health__chev" aria-hidden="true">▾</span>
+    </button>
+    <div class="health__body" id="boardBody" hidden>
+      <div class="lb__controls">
+        <span class="ctl__label">// rank by</span>
+        <button class="ctl__btn is-on" data-sort="features">features</button>
+        <button class="ctl__btn" data-sort="avg">avg score</button>
+        <button class="ctl__btn" data-sort="best">best score</button>
+        <button class="ctl__btn" data-sort="total">total items</button>
+        <span class="ctl__sep" aria-hidden="true">|</span>
+        <label class="ctl__toggle">
+          <input type="checkbox" id="lbAllDays" />
+          <span>all archived days</span>
+        </label>
+      </div>
+      <div class="lb__table" id="lbTable"></div>
+      <p class="health__foot" id="lbFoot"></p>
+    </div>
+  </section>
+
+  <!-- Diff view: what changed between two briefings. -->
+  <section class="health" id="diffPanel" hidden>
+    <button class="health__toggle" id="diffToggle" aria-expanded="false" aria-controls="diffBody">
+      <span class="health__dot" id="diffDot" aria-hidden="true"></span>
+      <span class="health__headline" id="diffHeadline">Diff view</span>
+      <span class="health__chev" aria-hidden="true">▾</span>
+    </button>
+    <div class="health__body" id="diffBody" hidden>
+      <div class="lb__controls">
+        <span class="ctl__label">// compare</span>
+        <span class="diff__base" id="diffBase">—</span>
+        <span class="ctl__label">against</span>
+        <span class="archive__select-wrap">
+          <select class="archive__select" id="diffSelect" aria-label="Compare against date"></select>
+        </span>
+      </div>
+      <div class="diff__grid" id="diffGrid"></div>
+      <p class="health__foot" id="diffFoot"></p>
     </div>
   </section>
 
