@@ -672,34 +672,90 @@ function renderCard(item) {
   return node;
 }
 
+/* Category id helper — stable, collision-free DOM ids for aria-controls. */
+function catId(name) {
+  return "cat-" + String(name).toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+/* Find a rendered category section by its authoritative name.
+   Reads data-cat, never parsed text content — text is escaped/uppercased by CSS
+   and would not round-trip reliably. */
+function sectionFor(name) {
+  return $$(".category", board).find((s) => s.dataset.cat === name) || null;
+}
+
+/* Single source of truth for open/closed. Called by delegation, by the
+   collapse-all / expand-all buttons, and by the keyboard shortcuts. */
+function setCategoryCollapsed(name, collapsed, { persist = true } = {}) {
+  if (collapsed) COLLAPSED.add(name); else COLLAPSED.delete(name);
+
+  const section = sectionFor(name);
+  if (section) {
+    const btn = $(".category__toggle", section);
+    const body = $(".category__body", section);
+    section.dataset.collapsed = String(collapsed);
+    if (btn) {
+      btn.setAttribute("aria-expanded", String(!collapsed));
+      const state = $(".category__state", btn);
+      if (state) state.textContent = collapsed ? "show" : "hide";
+    }
+    if (body) body.hidden = collapsed;
+  }
+  if (persist) savePrefs({ collapsed: [...COLLAPSED] });
+}
+
+function toggleCategory(name) {
+  setCategoryCollapsed(name, !COLLAPSED.has(name));
+}
+
+function setAllCategories(collapsed) {
+  $$(".category", board).forEach((s) =>
+    setCategoryCollapsed(s.dataset.cat, collapsed, { persist: false }));
+  if (!collapsed) COLLAPSED.clear();
+  savePrefs({ collapsed: [...COLLAPSED] });
+}
+
+/* STRUCTURE NOTE — why this is not a <button> wrapping an <h2>:
+   <button> only permits PHRASING content, so an <h2> inside it is invalid HTML
+   and is a known source of flaky click/flex behaviour in WebKit. The heading
+   now wraps the button (valid), the button contains only spans, and the flex
+   layout lives on an inner span rather than on the button itself — Safari has
+   long-standing bugs with `display:flex` applied directly to <button>. */
 function renderCategory(name, items) {
   const section = document.createElement("section");
   section.className = "category";
+  section.dataset.cat = name;                       // authoritative key
   const collapsed = COLLAPSED.has(name);
   section.dataset.collapsed = String(collapsed);
 
-  const head = document.createElement("button");
+  const bodyId = catId(name) + "-body";
+
+  const head = document.createElement("h2");        // sticky lives here
   head.className = "category__head";
-  head.type = "button";
-  head.setAttribute("aria-expanded", String(!collapsed));
-  head.innerHTML =
-    `<span class="slash">//</span><h2>${escapeHtml(name)}</h2>` +
-    `<span class="rule"></span><span class="count">[${items.length}]</span>` +
-    `<span class="category__chev" aria-hidden="true">▾</span>`;
+
+  const btn = document.createElement("button");     // the hit target
+  btn.type = "button";
+  btn.className = "category__toggle";
+  btn.dataset.catToggle = name;                     // delegation hook
+  btn.setAttribute("aria-expanded", String(!collapsed));
+  btn.setAttribute("aria-controls", bodyId);
+  btn.innerHTML =
+    `<span class="category__inner">` +
+      `<span class="category__chev" aria-hidden="true">\u25B6</span>` +
+      `<span class="slash" aria-hidden="true">//</span>` +
+      `<span class="category__name">${escapeHtml(name)}</span>` +
+      `<span class="rule" aria-hidden="true"></span>` +
+      `<span class="count">${items.length}</span>` +
+      `<span class="category__state">${collapsed ? "show" : "hide"}</span>` +
+    `</span>`;
+  head.appendChild(btn);
 
   const body = document.createElement("div");
   body.className = "category__body";
+  body.id = bodyId;
   body.hidden = collapsed;
   items.forEach((it) => body.appendChild(renderCard(it)));
-
-  head.addEventListener("click", () => {
-    const nowCollapsed = !COLLAPSED.has(name);
-    if (nowCollapsed) COLLAPSED.add(name); else COLLAPSED.delete(name);
-    section.dataset.collapsed = String(nowCollapsed);
-    head.setAttribute("aria-expanded", String(!nowCollapsed));
-    body.hidden = nowCollapsed;
-    savePrefs({ collapsed: [...COLLAPSED] });
-  });
 
   section.appendChild(head);
   section.appendChild(body);
@@ -880,16 +936,15 @@ function scheduleRefresh() {
       MIN_SCORE = 0; savePrefs({ minScore: 0 }); applyFilter();
     });
 
-    // category collapse
-    $("#collapseAll").addEventListener("click", () => {
-      $$(".category").forEach((s) => {
-        const n = $("h2", s)?.textContent; if (n) COLLAPSED.add(n);
-      });
-      savePrefs({ collapsed: [...COLLAPSED] }); applyFilter();
+    // category collapse — ONE delegated listener on the board. Survives every
+    // re-render (filter, score, day-flip, auto-refresh) because it is bound to
+    // the container, not to buttons that get destroyed and rebuilt.
+    board.addEventListener("click", (e) => {
+      const btn = e.target.closest && e.target.closest("[data-cat-toggle]");
+      if (btn && board.contains(btn)) toggleCategory(btn.dataset.catToggle);
     });
-    $("#expandAll").addEventListener("click", () => {
-      COLLAPSED.clear(); savePrefs({ collapsed: [] }); applyFilter();
-    });
+    $("#collapseAll").addEventListener("click", () => setAllCategories(true));
+    $("#expandAll").addEventListener("click", () => setAllCategories(false));
 
     // leaderboard controls
     $$("#boardBody [data-sort]").forEach((btn) => {
