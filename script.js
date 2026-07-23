@@ -20,10 +20,6 @@ const CONFIG = {
   // IANA zone for all displayed timestamps. America/Los_Angeles switches between
   // PST and PDT automatically, so the label is always correct.
   TZ: "America/Los_Angeles",
-
-  // Auto-refresh floor. 5 min = 12 req/hr against the unauthenticated 60/hr cap,
-  // leaving room for manual reloads. Anything faster risks a 403 lockout.
-  MIN_REFRESH_MINUTES: 5,
 };
 /* ========================================================================== */
 
@@ -41,7 +37,6 @@ let COLLAPSED = new Set();// category names collapsed by the user
 let LB_SORT = "features"; // leaderboard sort key
 let LB_ALL_DAYS = false;  // leaderboard scope
 let DIFF_AGAINST = null;  // date the diff panel compares to
-let refreshTimer = null;
 
 /* ------------------------------ preferences ------------------------------ */
 /* This is a real static site (not a sandboxed artifact), so localStorage is
@@ -103,8 +98,7 @@ async function fetchGist() {
       });
       if (r.ok) return r.json();
       if (r.status === 403) throw new Error(
-        "GitHub API rate limit reached (60/hr per IP). Try again shortly, " +
-        "or lower the auto-refresh frequency.");
+        "GitHub API rate limit reached (60 requests/hr per IP). Try again shortly.");
     } catch (e) {
       if (e && /rate limit/i.test(e.message)) throw e;   // surface, don't mask
       /* otherwise fall through to RAW_URL */
@@ -185,16 +179,22 @@ function matchesAll(hay, toks) {
   return toks.every((t) => hay.includes(t));
 }
 
+/* null (not 0) when a briefing predates scored also_notable, so "unknown" is
+   distinguishable from "genuinely scored zero". */
 function scoreOf(item) {
-  return typeof item.score === "number" ? item.score : 0;
+  return typeof item.score === "number" ? item.score : null;
 }
 
 /* Returns a briefing-shaped object containing only matching items.
 
-   NOTE ON SCORE + NOTABLE: editor.py writes also_notable as {title, source, url}
-   with NO score field, so notable items cannot be score-filtered. Rather than
-   silently keep unscored items while the threshold hides scored ones, any
-   threshold above 0 hides the notable strip entirely and the UI says so. */
+   SCORE + NOTABLE: editor.py now writes also_notable with {score, tier}, so the
+   threshold applies to notable items exactly as it does to feature cards. This
+   matters most on busy days: items above MAX_FEATURES spill into also_notable
+   while still being feature-tier (score >= 7), and the old "hide all notable"
+   behaviour threw away the highest-scoring spillover.
+
+   Briefings archived BEFORE that change have no score on notable items. Those
+   are reported separately as `legacyNote` rather than silently kept or dropped. */
 function filterBriefing(data, query, minScore) {
   const toks = tokens(query);
   const cats = data.categories || {};
@@ -204,25 +204,33 @@ function filterBriefing(data, query, minScore) {
   const active = toks.length > 0 || minScore > 0;
 
   if (!active) {
-    return { data, active: false, scoreActive: false, totalFeat, totalNote,
-             matchFeat: totalFeat, matchNote: totalNote };
+    return { data, active: false, scoreActive: false, legacyNote: 0,
+             totalFeat, totalNote, matchFeat: totalFeat, matchNote: totalNote };
   }
 
   const outCats = {};
   let matchFeat = 0;
   for (const [name, items] of Object.entries(cats)) {
-    const keep = (items || []).filter((it) =>
-      scoreOf(it) >= minScore && (!toks.length || matchesAll(cardHaystack(it), toks)));
+    const keep = (items || []).filter((it) => {
+      const s = scoreOf(it);
+      return (s === null || s >= minScore) &&
+             (!toks.length || matchesAll(cardHaystack(it), toks));
+    });
     if (keep.length) { outCats[name] = keep; matchFeat += keep.length; }
   }
 
-  const outNote = minScore > 0
-    ? []
-    : notable.filter((it) => matchesAll(notableHaystack(it), toks));
+  let legacyNote = 0;
+  const outNote = notable.filter((it) => {
+    if (toks.length && !matchesAll(notableHaystack(it), toks)) return false;
+    if (minScore <= 0) return true;
+    const s = scoreOf(it);
+    if (s === null) { legacyNote += 1; return false; }   // pre-score briefing
+    return s >= minScore;
+  });
 
   return {
     data: { ...data, categories: outCats, also_notable: outNote },
-    active: true, scoreActive: minScore > 0, totalFeat, totalNote,
+    active: true, scoreActive: minScore > 0, legacyNote, totalFeat, totalNote,
     matchFeat, matchNote: outNote.length,
   };
 }
@@ -233,7 +241,7 @@ function syncSearchUI(res) {
   clearEl.hidden = !tokens(QUERY).length;
   countEl.textContent = res.active
     ? `${res.matchFeat}/${res.totalFeat} features · ${res.matchNote}/${res.totalNote} notable`
-      + (res.scoreActive ? ` · notable hidden (unscored)` : "")
+      + (res.legacyNote ? ` · ${res.legacyNote} unscored (archived before scoring)` : "")
     : "";
   countEl.dataset.empty = String(res.active && !res.matchFeat && !res.matchNote);
 }
@@ -445,7 +453,8 @@ function tallySources(dates) {
   const t = new Map();
   const get = (src) => {
     if (!t.has(src)) t.set(src, {
-      source: src, features: 0, notable: 0, scoreSum: 0, best: 0, days: new Set(),
+      source: src, features: 0, notable: 0, scored: 0,
+      scoreSum: 0, best: 0, days: new Set(),
     });
     return t.get(src);
   };
@@ -457,22 +466,24 @@ function tallySources(dates) {
       (items || []).forEach((it) => {
         const row = get(it.source || hostOf(it.url || ""));
         row.features += 1;
-        row.scoreSum += scoreOf(it);
-        row.best = Math.max(row.best, scoreOf(it));
         row.days.add(date);
+        const s = scoreOf(it);
+        if (s !== null) { row.scored += 1; row.scoreSum += s; row.best = Math.max(row.best, s); }
       });
     });
     (day.also_notable || []).forEach((it) => {
       const row = get(it.source || hostOf(it.url || ""));
       row.notable += 1;
       row.days.add(date);
+      const s = scoreOf(it);                 // present since scored also_notable
+      if (s !== null) { row.scored += 1; row.scoreSum += s; row.best = Math.max(row.best, s); }
     });
   });
 
   return Array.from(t.values()).map((r) => ({
     ...r,
     total: r.features + r.notable,
-    avg: r.features ? r.scoreSum / r.features : 0,
+    avg: r.scored ? r.scoreSum / r.scored : 0,
     dayCount: r.days.size,
   }));
 }
@@ -510,7 +521,7 @@ function renderLeaderboard() {
       </span>
       <span class="lb__n">${r.features}</span>
       <span class="lb__n lb__n--dim">${r.notable}</span>
-      <span class="lb__n">${r.features ? r.avg.toFixed(1) : "—"}</span>
+      <span class="lb__n">${r.scored ? r.avg.toFixed(1) : "—"}</span>
       <span class="lb__n ${r.best >= 9 ? "is-hot" : ""}">${r.best || "—"}</span>
     </div>`).join("")
     : `<p class="delta__none">Nothing to rank in this briefing.</p>`;
@@ -773,9 +784,13 @@ function renderNotable(items) {
     a.className = "notable__item";
     a.href = it.url || "#";
     a.target = "_blank"; a.rel = "noopener noreferrer";
+    const s = scoreOf(it);
+    if (it.tier === "overflow") a.dataset.tier = "overflow";
     a.innerHTML =
       `<span class="notable__src">${escapeHtml(it.source || "")}</span>` +
-      `<span class="notable__ttl">${escapeHtml(it.title || "")}</span>`;
+      `<span class="notable__ttl">${escapeHtml(it.title || "")}</span>` +
+      (s === null ? "" :
+        `<span class="notable__score"${s >= 7 ? ' data-hi="true"' : ""}>${s}</span>`);
     list.appendChild(a);
   });
   wrap.appendChild(list);
@@ -846,53 +861,6 @@ function escapeHtml(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-/* ------------------------------ auto-refresh ------------------------------ */
-/* Re-fetches the Gist on an interval and swaps in new data WITHOUT losing your
-   place: the current day is tracked by DATE, not index, because a new briefing
-   shifts every index by one. If you are pinned to an archived day, the data
-   updates silently behind you and a NEW BRIEFING flag appears. */
-async function refreshNow({ silent = false } = {}) {
-  const stamp = $("#refreshStamp");
-  if (!silent) stamp.textContent = "checking…";
-  try {
-    const gist = await fetchGist();
-    const next = await buildStore(gist);
-    if (!next.dates.length) throw new Error("Gist returned no briefings.");
-
-    const wasDate = STORE.dates[currentIndex];
-    const wasNewest = currentIndex === 0;
-    const newestChanged = next.dates[0] !== STORE.dates[0];
-
-    STORE = next;
-    const idx = STORE.dates.indexOf(wasDate);
-    currentIndex = wasNewest ? 0 : (idx === -1 ? 0 : idx);
-
-    $("#newFlag").hidden = !(newestChanged && !wasNewest);
-
-    applyFilter();
-    renderHealth(STORE.dates[currentIndex]);
-    renderLeaderboard();
-    syncDiffUI();
-    syncArchiveUI();
-
-    stamp.textContent = "checked " + fmtPacific(new Date().toISOString(), { withDate: false });
-    stamp.dataset.state = "";
-  } catch (e) {
-    stamp.textContent = (e && e.message) || "refresh failed";
-    stamp.dataset.state = "error";
-  }
-}
-
-function scheduleRefresh() {
-  if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
-  const on = $("#autoRefresh").checked;
-  const mins = Math.max(CONFIG.MIN_REFRESH_MINUTES, Number($("#refreshEvery").value) || 15);
-  $("#refreshEvery").disabled = !on;
-  if (!on) { $("#refreshStamp").textContent = ""; return; }
-  refreshTimer = setInterval(() => refreshNow({ silent: true }), mins * 60 * 1000);
-  $("#refreshStamp").textContent = `every ${mins}m`;
-}
-
 /* --------------------------------- boot ---------------------------------- */
 (async function boot() {
   // restore preferences before the first render
@@ -911,9 +879,7 @@ function scheduleRefresh() {
       (e) => showIndex(Number(e.target.value)));
     $("#prevDay").addEventListener("click", () => showIndex(currentIndex + 1));
     $("#nextDay").addEventListener("click", () => showIndex(currentIndex - 1));
-    $("#latestBtn").addEventListener("click", () => {
-      $("#newFlag").hidden = true; showIndex(0);
-    });
+    $("#latestBtn").addEventListener("click", () => showIndex(0));
 
     const input = $("#searchInput");
     input.addEventListener("input", (e) => { QUERY = e.target.value; applyFilter(); });
@@ -969,19 +935,6 @@ function scheduleRefresh() {
     $("#diffSelect").addEventListener("change", (e) => {
       DIFF_AGAINST = e.target.value; renderDiff();
     });
-
-    // auto-refresh
-    const auto = $("#autoRefresh"), every = $("#refreshEvery");
-    auto.checked = !!prefs.autoRefresh;
-    if (prefs.refreshEvery) every.value = String(prefs.refreshEvery);
-    auto.addEventListener("change", () => {
-      savePrefs({ autoRefresh: auto.checked }); scheduleRefresh();
-    });
-    every.addEventListener("change", () => {
-      savePrefs({ refreshEvery: Number(every.value) }); scheduleRefresh();
-    });
-    $("#refreshNow").addEventListener("click", () => refreshNow());
-    scheduleRefresh();
 
     // panel toggles
     [["#healthToggle", "#healthBody"], ["#boardToggle", "#boardBody"],
