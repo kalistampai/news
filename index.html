@@ -11,15 +11,20 @@
        behind a CDN that will happily serve a previous script.js/style.css for
        some time after a push; that is what produced the "arrow rotates but
        nothing collapses" symptom (old CSS had the chevron rule, not the
-       hide rule). BUMP THE ?v= VALUE, data-build BELOW, AND `BUILD` IN
-       script.js TOGETHER whenever you change these files. -->
+       hide rule). The build string now lives in FOUR places and script.js
+       verifies all of them at boot, showing a red banner if they disagree:
+         1. the ?v= query on both <link> and <script> below
+         2. data-build on <body>
+         3. `BUILD` in script.js
+         4. `--build` on :root in style.css
+       Bump all four together whenever you change these files. -->
   <title>DISPATCH — Daily Intel Briefing</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css?v=2026-07-22g" />
+  <link rel="stylesheet" href="style.css?v=2026-07-22h" />
 </head>
-<body data-build="2026-07-22g">
+<body data-build="2026-07-22h">
   <div class="scanline" aria-hidden="true"></div>
 
   <header class="masthead">
@@ -177,6 +182,6 @@
     <span id="footerNote">DISPATCH · static dashboard · data via GitHub Gist</span>
   </footer>
 
-  <script src="script.js?v=2026-07-22g"></script>
+  <script src="script.js?v=2026-07-22h"></script>
 </body>
 </html>
