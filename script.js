@@ -27,7 +27,7 @@ const CONFIG = {
    <body data-build>. A mismatch means one of the two files is stale — usually a
    cached script.js on GitHub Pages — which is exactly how a removed control ends
    up referenced by old code and throws "Cannot set properties of null". */
-const BUILD = "2026-07-22g";
+const BUILD = "2026-07-22h";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -760,7 +760,10 @@ function paintCategory(section, collapsed) {
     body.style.display = collapsed ? "none" : "";   // authoritative
   }
 
-  const chev = $(".category__chev", section);       // arrow follows the SAME state
+  // Arrow follows the SAME state. The inline transform outranks the stylesheet;
+  // style.css carries an identical rule keyed to data-collapsed as a fallback,
+  // so the two can never point in opposite directions.
+  const chev = $(".category__chev", section);
   if (chev) chev.style.transform = collapsed ? "rotate(0deg)" : "rotate(90deg)";
 
   const btn = $(".category__toggle", section);
@@ -934,6 +937,10 @@ function render(data, filterRes) {
   el("#statBar").hidden = false;
   el("#searchBar").hidden = false;
   el("#controlBar").hidden = false;
+
+  // The "n/m collapsed" readout is derived state; recompute it here so a day
+  // flip or a filter change cannot leave a stale count on screen.
+  syncCollapseUI();
 }
 
 function renderError(msg) {
@@ -948,13 +955,42 @@ function escapeHtml(s) {
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+/* --------------------------- asset version check -------------------------- */
+/* Three files must agree: index.html (data-build), script.js (BUILD) and
+   style.css (--build). GitHub Pages sits behind a CDN that will serve a
+   previous style.css for a while after a push, and a stale stylesheet is the
+   only thing that has ever produced the "arrow moves, nothing collapses"
+   symptom. Rather than let that present as a broken feature, say it out loud. */
+function checkAssetVersions() {
+  const htmlBuild = (document.body.dataset.build || "").trim();
+  const cssBuild = getComputedStyle(document.documentElement)
+    .getPropertyValue("--build").trim().replace(/^["']|["']$/g, "");
+
+  const stale = [];
+  if (htmlBuild && htmlBuild !== BUILD) stale.push(`index.html=${htmlBuild}`);
+  if (!cssBuild) stale.push("style.css=(not loaded)");
+  else if (cssBuild !== BUILD) stale.push(`style.css=${cssBuild}`);
+  if (!stale.length) return;
+
+  console.warn(`[DISPATCH] asset build mismatch — script.js=${BUILD}, ` +
+               stale.join(", ") + ". Hard-reload (Cmd/Ctrl+Shift+R).");
+
+  const bar = document.createElement("button");
+  bar.type = "button";
+  bar.className = "stalebar";
+  bar.innerHTML =
+    `<b>Stale cached assets</b> — script.js is ${escapeHtml(BUILD)}, but ` +
+    escapeHtml(stale.join(" / ")) +
+    `. Tap here to hard-reload; collapse may misbehave until you do.`;
+  bar.addEventListener("click", () => {
+    location.replace(location.pathname + "?cb=" + Date.now() + location.hash);
+  });
+  document.body.insertBefore(bar, document.body.firstChild);
+}
+
 /* --------------------------------- boot ---------------------------------- */
 (async function boot() {
-  const htmlBuild = document.body.dataset.build;
-  if (htmlBuild && htmlBuild !== BUILD) {
-    console.warn(`[DISPATCH] build mismatch — index.html=${htmlBuild} ` +
-                 `script.js=${BUILD}. One file is stale; hard-reload the page.`);
-  }
+  checkAssetVersions();
 
   // restore preferences before the first render
   const prefs = loadPrefs();
@@ -1006,9 +1042,19 @@ function escapeHtml(s) {
       // category collapse — ONE delegated listener on the board. Survives every
       // re-render (filter, score, day-flip) because it is bound to the
       // container, not to buttons that get destroyed and rebuilt.
-      board.addEventListener("click", (e) => {
-        const btn = e.target.closest && e.target.closest("[data-cat-toggle]");
-        if (btn && board.contains(btn)) toggleCategory(btn.dataset.catToggle);
+      // Bound to `document`, not to #board: a listener on the container dies if
+      // the container is ever replaced rather than emptied, and Safari can hand
+      // back a TEXT node as e.target for a touch-generated click, which has no
+      // .closest(). Both are resolved here.
+      document.addEventListener("click", (e) => {
+        let node = e.target;
+        if (node && node.nodeType === 3) node = node.parentElement;  // text node
+        if (!node || typeof node.closest !== "function") return;
+        const btn = node.closest("[data-cat-toggle]");
+        if (btn) {
+          e.preventDefault();
+          toggleCategory(btn.dataset.catToggle);
+        }
       });
       on("#collapseAll", "click", (e) => { e.preventDefault(); setAllCategories(true); });
       on("#expandAll", "click", (e) => { e.preventDefault(); setAllCategories(false); });
@@ -1048,8 +1094,11 @@ function escapeHtml(s) {
 
       // keyboard: "/" filter, j/k days, c/e collapse-expand
       document.addEventListener("keydown", (e) => {
+        // Ctrl/Cmd+C (copy) and Cmd+E were firing the collapse/expand shortcuts.
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
         const ae = document.activeElement;
-        const typing = !!ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
+        const typing = !!ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) ||
+                       (!!ae && ae.isContentEditable);
         if (e.key === "/" && !typing) {
           e.preventDefault(); if (input) input.focus(); return;
         }
