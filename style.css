@@ -175,11 +175,6 @@ body {
   padding: .25rem .35rem; cursor: pointer;
 }
 .ctl__select:disabled { opacity: .4; cursor: default; }
-.ctl__stamp { font-size: .66rem; color: var(--ink-faint); letter-spacing: .04em; }
-.ctl__stamp[data-state="error"] { color: var(--hot); }
-
-.flag--new { border-color: var(--accent); color: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
-@keyframes pulse { 50% { opacity: .45; } }
 
 /* ---------- leaderboard ---------- */
 .lb__controls {
@@ -461,7 +456,16 @@ body {
   text-transform: uppercase; flex: 0 0 128px; letter-spacing: .05em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.notable__ttl { color: var(--ink-dim); font-size: .9rem; transition: color .15s; }
+.notable__ttl { color: var(--ink-dim); font-size: .9rem; transition: color .15s; flex: 1 1 auto; }
+/* Score badge — makes feature-tier overflow (>=7) visually distinct from true
+   notable-tier items now that editor.py carries the score through. */
+.notable__score {
+  flex: 0 0 auto; font-family: var(--mono); font-size: .62rem; color: var(--ink-faint);
+  border: 1px solid var(--line); border-radius: 999px; padding: .05rem .4rem;
+  margin-left: auto;
+}
+.notable__score[data-hi="true"] { color: var(--accent); border-color: var(--accent-dim); }
+.notable__item[data-tier="overflow"] { border-left: 2px solid var(--accent-dim); padding-left: .5rem; }
 
 /* ---------- states ---------- */
 .state { text-align: center; padding: 5rem 1rem; color: var(--ink-faint);
