@@ -23,9 +23,48 @@ const CONFIG = {
 };
 /* ========================================================================== */
 
+/* Bump on every paired HTML/JS change. index.html carries the same string on
+   <body data-build>. A mismatch means one of the two files is stale — usually a
+   cached script.js on GitHub Pages — which is exactly how a removed control ends
+   up referenced by old code and throws "Cannot set properties of null". */
+const BUILD = "2026-07-22g";
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+/* Missing-element-tolerant helpers. Optional UI controls must never be able to
+   abort boot(): one null lookup used to jump straight to the catch block and
+   render the whole dashboard as OFFLINE, hiding a briefing that had loaded fine. */
+const MISSING = [];
+
+function el(sel) {
+  const node = $(sel);
+  if (node) return node;
+  if (!MISSING.includes(sel)) MISSING.push(sel);
+  // Detached stand-in: textContent / innerHTML / dataset / hidden / classList /
+  // appendChild / addEventListener all work and affect nothing. Turns "control
+  // was removed from the markup" from a fatal TypeError into a no-op.
+  return document.createElement("span");
+}
+
+function on(sel, type, handler, opts) {
+  const node = $(sel);
+  if (node) node.addEventListener(type, handler, opts);
+  else if (!MISSING.includes(sel)) MISSING.push(sel);
+  return node;
+}
+
+function setProp(sel, prop, value) {
+  const node = $(sel);
+  if (node) node[prop] = value;
+  else if (!MISSING.includes(sel)) MISSING.push(sel);
+  return node;
+}
 const board = $("#board");
+if (!board) {
+  console.error('[DISPATCH] #board is missing from index.html — nothing can render. ' +
+                'index.html and script.js are out of sync.');
+}
 const BRIEF_RE = /^briefing-(\d{4}-\d{2}-\d{2})\.json$/;
 const REPORT_RE = /^feedreport-(\d{4}-\d{2}-\d{2})\.json$/;
 
@@ -236,8 +275,8 @@ function filterBriefing(data, query, minScore) {
 }
 
 function syncSearchUI(res) {
-  const countEl = $("#searchCount");
-  const clearEl = $("#searchClear");
+  const countEl = el("#searchCount");
+  const clearEl = el("#searchClear");
   clearEl.hidden = !tokens(QUERY).length;
   countEl.textContent = res.active
     ? `${res.matchFeat}/${res.totalFeat} features · ${res.matchNote}/${res.totalNote} notable`
@@ -247,10 +286,10 @@ function syncSearchUI(res) {
 }
 
 function syncScoreUI() {
-  $("#scoreRange").value = String(MIN_SCORE);
-  $("#scoreValue").textContent = MIN_SCORE === 0 ? "all" : `≥ ${MIN_SCORE}`;
-  $("#scoreValue").dataset.on = String(MIN_SCORE > 0);
-  $("#scoreReset").hidden = MIN_SCORE === 0;
+  el("#scoreRange").value = String(MIN_SCORE);
+  el("#scoreValue").textContent = MIN_SCORE === 0 ? "all" : `≥ ${MIN_SCORE}`;
+  el("#scoreValue").dataset.on = String(MIN_SCORE > 0);
+  el("#scoreReset").hidden = MIN_SCORE === 0;
 }
 
 function applyFilter() {
@@ -261,18 +300,19 @@ function applyFilter() {
   render(res.data, res);
   syncSearchUI(res);
   syncScoreUI();
+  syncCollapseUI();
 }
 
 /* --------------------------- archive navigator --------------------------- */
 function syncArchiveUI() {
   const { dates } = STORE;
-  const sel = $("#archiveSelect");
+  const sel = el("#archiveSelect");
 
   // One day of data = nothing to navigate between. dispatch.py writes
   // briefing.json AND briefing-<date>.json from the same payload, so a first run
   // produces two FILES but only one DAY. The bar appears on day two.
-  $("#archiveBar").hidden = dates.length <= 1;
-  $("#archiveCount").textContent =
+  el("#archiveBar").hidden = dates.length <= 1;
+  el("#archiveCount").textContent =
     dates.length ? `${dates.length} day${dates.length === 1 ? "" : "s"} archived` : "";
 
   sel.innerHTML = "";
@@ -284,10 +324,10 @@ function syncArchiveUI() {
   });
   sel.value = String(currentIndex);
 
-  $("#prevDay").disabled = currentIndex >= dates.length - 1;   // older
-  $("#nextDay").disabled = currentIndex <= 0;                  // newer
-  $("#latestBtn").disabled = currentIndex === 0;
-  $("#archiveFlag").hidden = currentIndex === 0;
+  el("#prevDay").disabled = currentIndex >= dates.length - 1;   // older
+  el("#nextDay").disabled = currentIndex <= 0;                  // newer
+  el("#latestBtn").disabled = currentIndex === 0;
+  el("#archiveFlag").hidden = currentIndex === 0;
 }
 
 function showIndex(i) {
@@ -360,7 +400,7 @@ function hostOf(u) {
 }
 
 function renderHealth(date) {
-  const panel = $("#healthPanel");
+  const panel = el("#healthPanel");
   const report = STORE.reports[date];
   if (!report) { panel.hidden = true; return; }
   panel.hidden = false;
@@ -370,14 +410,14 @@ function renderHealth(date) {
   const down = sources.length - ok;
   const severe = sources.filter((s) => SEVERE.has(s.status)).length;
 
-  $("#healthDot").dataset.level = severe ? "bad" : down ? "warn" : "good";
-  $("#healthHeadline").innerHTML =
+  el("#healthDot").dataset.level = severe ? "bad" : down ? "warn" : "good";
+  el("#healthHeadline").innerHTML =
     `Feed health — <b>${ok}</b>/${sources.length} contributing` +
     (down ? `, <b class="down">${down}</b> not` : "");
 
   const prevDate = previousDateWithReport(date);
   const deltas = computeDeltas(report, STORE.reports[prevDate]);
-  const tag = $("#healthDeltaTag");
+  const tag = el("#healthDeltaTag");
   if (deltas && (deltas.wentDark.length || deltas.recovered.length)) {
     tag.hidden = false;
     tag.textContent =
@@ -411,7 +451,7 @@ function renderHealth(date) {
     deltaHtml = `<p class="delta__none">No earlier report to compare against yet — ` +
                 `day-over-day changes appear from the second run onward.</p>`;
   }
-  $("#healthDeltas").innerHTML = deltaHtml;
+  el("#healthDeltas").innerHTML = deltaHtml;
 
   const groups = {};
   sources.filter((s) => s.status !== "OK")
@@ -419,7 +459,7 @@ function renderHealth(date) {
   const order = Object.keys(groups).sort(
     (a, b) => (SEVERE.has(b) - SEVERE.has(a)) || groups[b].length - groups[a].length);
 
-  $("#healthGroups").innerHTML = order.length
+  el("#healthGroups").innerHTML = order.length
     ? order.map((st) => `
         <div class="hgroup" data-severe="${SEVERE.has(st)}">
           <div class="hgroup__head">
@@ -438,7 +478,7 @@ function renderHealth(date) {
     : `<p class="delta__none">Every source is contributing. Nothing to fix.</p>`;
 
   const gen = report.generated_at ? fmtPacific(report.generated_at) : "";
-  $("#healthFoot").textContent =
+  el("#healthFoot").textContent =
     `${sources.length} sources checked` +
     (report.lookback_hours ? ` · ${report.lookback_hours}h lookback` : "") +
     (gen ? ` · checked ${gen}` : "") +
@@ -496,19 +536,19 @@ const LB_SORTS = {
 };
 
 function renderLeaderboard() {
-  const panel = $("#boardPanel");
+  const panel = el("#boardPanel");
   if (!STORE.dates.length) { panel.hidden = true; return; }
   panel.hidden = false;
 
   const scope = LB_ALL_DAYS ? STORE.dates : [STORE.dates[currentIndex]];
   const rows = tallySources(scope).sort(LB_SORTS[LB_SORT] || LB_SORTS.features);
 
-  $("#boardHeadline").innerHTML =
+  el("#boardHeadline").innerHTML =
     `Source leaderboard — <b>${rows.length}</b> source${rows.length === 1 ? "" : "s"}` +
     (LB_ALL_DAYS ? ` across ${scope.length} day${scope.length === 1 ? "" : "s"}` : "");
 
   const maxFeat = Math.max(1, ...rows.map((r) => r.features));
-  $("#lbTable").innerHTML = rows.length ? `
+  el("#lbTable").innerHTML = rows.length ? `
     <div class="lb__head">
       <span>#</span><span>source</span><span>feat</span>
       <span>notable</span><span>avg</span><span>best</span>
@@ -527,7 +567,7 @@ function renderLeaderboard() {
     : `<p class="delta__none">Nothing to rank in this briefing.</p>`;
 
   const zero = rows.filter((r) => !r.features).length;
-  $("#lbFoot").textContent =
+  el("#lbFoot").textContent =
     (LB_ALL_DAYS ? `All ${scope.length} archived day(s)` : `Day ${scope[0]}`) +
     ` · ${rows.length} sources appeared` +
     (zero ? ` · ${zero} produced notable-only (no feature-tier hits)` : "") +
@@ -590,7 +630,7 @@ function diffList(title, cls, items, opts = {}) {
 }
 
 function renderDiff() {
-  const panel = $("#diffPanel");
+  const panel = el("#diffPanel");
   const dates = STORE.dates;
   if (dates.length < 2) {
     panel.hidden = true;
@@ -603,15 +643,15 @@ function renderDiff() {
     ? DIFF_AGAINST
     : (dates[currentIndex + 1] || dates.find((d) => d !== baseDate));
 
-  $("#diffBase").textContent = baseDate;
+  el("#diffBase").textContent = baseDate;
   const d = computeDiff(STORE.byDate[baseDate], STORE.byDate[against]);
 
-  $("#diffDot").dataset.level = d.added.length ? "good" : "warn";
-  $("#diffHeadline").innerHTML =
+  el("#diffDot").dataset.level = d.added.length ? "good" : "warn";
+  el("#diffHeadline").innerHTML =
     `Diff view — <b>${d.added.length}</b> new, <b>${d.dropped.length}</b> gone, ` +
     `${d.carried.length} carried over`;
 
-  $("#diffGrid").innerHTML =
+  el("#diffGrid").innerHTML =
     diffList(`New in ${baseDate}`, "add", d.added) +
     diffList(`Gone since ${against}`, "drop", d.dropped) +
     diffList("Tier changed", "move", d.promoted) +
@@ -621,13 +661,13 @@ function renderDiff() {
   const srcBits = [];
   if (d.newSources.length) srcBits.push(`new sources: ${d.newSources.slice(0, 8).join(", ")}`);
   if (d.goneSources.length) srcBits.push(`absent today: ${d.goneSources.slice(0, 8).join(", ")}`);
-  $("#diffFoot").textContent =
+  el("#diffFoot").textContent =
     `${baseDate} vs ${against} · matched by article URL` +
     (srcBits.length ? ` · ${srcBits.join(" · ")}` : "");
 }
 
 function syncDiffUI() {
-  const sel = $("#diffSelect");
+  const sel = el("#diffSelect");
   const dates = STORE.dates;
   const baseDate = dates[currentIndex];
   const options = dates.filter((d) => d !== baseDate);
@@ -656,7 +696,12 @@ function buildMeter(score) {
 }
 
 function renderCard(item) {
-  const node = $("#cardTpl").content.cloneNode(true);
+  const tpl = $("#cardTpl");
+  if (!tpl || !tpl.content) {
+    throw new Error("#cardTpl <template> is missing from index.html — " +
+                    "index.html and script.js are out of sync.");
+  }
+  const node = tpl.content.cloneNode(true);
   const score = typeof item.score === "number" ? item.score : 8;
 
   $(".meter", node).appendChild(buildMeter(score));
@@ -696,35 +741,77 @@ function sectionFor(name) {
   return $$(".category", board).find((s) => s.dataset.cat === name) || null;
 }
 
+/* THE painter. Arrow and body are updated by this one function and nowhere else,
+   so they physically cannot disagree — the old failure mode was the chevron
+   rotating from a CSS rule while the body stayed visible because a DIFFERENT
+   CSS rule (in a stale style.css) never applied.
+
+   Hiding is done with an INLINE style, which outranks every author stylesheet
+   rule. Collapse therefore keeps working even if style.css is cached, stale, or
+   fails to load entirely. The hidden attribute and the CSS rules remain as
+   redundant belt-and-braces, but nothing depends on them. */
+function paintCategory(section, collapsed) {
+  if (!section) return;
+  section.dataset.collapsed = String(collapsed);
+
+  const body = $(".category__body", section);
+  if (body) {
+    body.hidden = collapsed;                        // semantics + a11y
+    body.style.display = collapsed ? "none" : "";   // authoritative
+  }
+
+  const chev = $(".category__chev", section);       // arrow follows the SAME state
+  if (chev) chev.style.transform = collapsed ? "rotate(0deg)" : "rotate(90deg)";
+
+  const btn = $(".category__toggle", section);
+  if (btn) btn.setAttribute("aria-expanded", String(!collapsed));
+
+  const state = $(".category__state", section);
+  if (state) state.textContent = collapsed ? "show" : "hide";
+}
+
 /* Single source of truth for open/closed. Called by delegation, by the
    collapse-all / expand-all buttons, and by the keyboard shortcuts. */
 function setCategoryCollapsed(name, collapsed, { persist = true } = {}) {
   if (collapsed) COLLAPSED.add(name); else COLLAPSED.delete(name);
-
-  const section = sectionFor(name);
-  if (section) {
-    const btn = $(".category__toggle", section);
-    const body = $(".category__body", section);
-    section.dataset.collapsed = String(collapsed);
-    if (btn) {
-      btn.setAttribute("aria-expanded", String(!collapsed));
-      const state = $(".category__state", btn);
-      if (state) state.textContent = collapsed ? "show" : "hide";
-    }
-    if (body) body.hidden = collapsed;
-  }
+  paintCategory(sectionFor(name), collapsed);
   if (persist) savePrefs({ collapsed: [...COLLAPSED] });
 }
 
 function toggleCategory(name) {
   setCategoryCollapsed(name, !COLLAPSED.has(name));
+  syncCollapseUI();
+}
+
+/* Every category name in the CURRENT DAY'S DATA — not just the ones that
+   survived the active search/score filter. Reading the DOM here was a bug: with
+   a filter on, filtered-out sections are not rendered, so "collapse all" skipped
+   them and they reappeared expanded the moment the filter was cleared. */
+function allCategoryNames() {
+  const dates = STORE.dates;
+  if (!dates.length) return [];
+  const cats = (STORE.byDate[dates[currentIndex]] || {}).categories || {};
+  return Object.keys(cats).filter((k) => (cats[k] || []).length);
+}
+
+/* Keeps the "n/m collapsed" readout truthful after any state change, whether it
+   came from a global button, an individual header, or a keyboard shortcut. */
+function syncCollapseUI() {
+  const node = el("#collapseState");          // renamed: `el` is the helper
+  const names = allCategoryNames();
+  const n = names.filter((x) => COLLAPSED.has(x)).length;
+  node.textContent = names.length ? `${n}/${names.length} collapsed` : "";
+  node.dataset.on = String(n > 0);
 }
 
 function setAllCategories(collapsed) {
-  $$(".category", board).forEach((s) =>
-    setCategoryCollapsed(s.dataset.cat, collapsed, { persist: false }));
-  if (!collapsed) COLLAPSED.clear();
+  // Scoped to this day's categories so the global buttons are idempotent and
+  // cannot be defeated by an active filter. setCategoryCollapsed tolerates a
+  // name with no rendered section — it still updates the COLLAPSED set.
+  allCategoryNames().forEach((name) =>
+    setCategoryCollapsed(name, collapsed, { persist: false }));
   savePrefs({ collapsed: [...COLLAPSED] });
+  syncCollapseUI();
 }
 
 /* STRUCTURE NOTE — why this is not a <button> wrapping an <h2>:
@@ -765,11 +852,11 @@ function renderCategory(name, items) {
   const body = document.createElement("div");
   body.className = "category__body";
   body.id = bodyId;
-  body.hidden = collapsed;
   items.forEach((it) => body.appendChild(renderCard(it)));
 
   section.appendChild(head);
   section.appendChild(body);
+  paintCategory(section, collapsed);   // same path as every later toggle
   return section;
 }
 
@@ -822,35 +909,35 @@ function render(data, filterRes) {
       ? `<div class="state">${why}
            <button class="state__reset" id="stateReset">clear filters</button></div>`
       : `<div class="state">${why}</div>`;
-    const reset = $("#stateReset");
+    const reset = el("#stateReset");
     if (reset) reset.addEventListener("click", () => {
-      $("#searchInput").value = ""; QUERY = ""; MIN_SCORE = 0;
+      el("#searchInput").value = ""; QUERY = ""; MIN_SCORE = 0;
       savePrefs({ minScore: 0 }); applyFilter();
     });
   }
 
   // header meta
-  const tag = $("#statusTag");
+  const tag = el("#statusTag");
   tag.textContent = "LIVE"; tag.dataset.state = "live";
-  $("#dateStamp").textContent = data.date || "";
-  $("#featCount").textContent = featTotal;
-  $("#notableCount").textContent = notable.length;
-  $("#catCount").textContent = catNames.length;
+  el("#dateStamp").textContent = data.date || "";
+  el("#featCount").textContent = featTotal;
+  el("#notableCount").textContent = notable.length;
+  el("#catCount").textContent = catNames.length;
 
-  const gen = $("#genStamp");
+  const gen = el("#genStamp");
   if (data.generated_at) {
     gen.textContent = "compiled " + fmtPacific(data.generated_at);
     gen.title = utcTitle(data.generated_at);
   } else {
     gen.textContent = ""; gen.title = "";
   }
-  $("#statBar").hidden = false;
-  $("#searchBar").hidden = false;
-  $("#controlBar").hidden = false;
+  el("#statBar").hidden = false;
+  el("#searchBar").hidden = false;
+  el("#controlBar").hidden = false;
 }
 
 function renderError(msg) {
-  const tag = $("#statusTag");
+  const tag = el("#statusTag");
   tag.textContent = "OFFLINE"; tag.dataset.state = "error";
   board.innerHTML =
     `<div class="state state--error"><p>${escapeHtml(msg)}</p></div>`;
@@ -863,6 +950,12 @@ function escapeHtml(s) {
 
 /* --------------------------------- boot ---------------------------------- */
 (async function boot() {
+  const htmlBuild = document.body.dataset.build;
+  if (htmlBuild && htmlBuild !== BUILD) {
+    console.warn(`[DISPATCH] build mismatch — index.html=${htmlBuild} ` +
+                 `script.js=${BUILD}. One file is stale; hard-reload the page.`);
+  }
+
   // restore preferences before the first render
   const prefs = loadPrefs();
   MIN_SCORE = Number.isFinite(prefs.minScore) ? Math.min(10, Math.max(0, prefs.minScore)) : 0;
@@ -875,88 +968,109 @@ function escapeHtml(s) {
     STORE = await buildStore(gist);
     if (!STORE.dates.length) throw new Error("No briefing found in the Gist yet.");
 
-    $("#archiveSelect").addEventListener("change",
-      (e) => showIndex(Number(e.target.value)));
-    $("#prevDay").addEventListener("click", () => showIndex(currentIndex + 1));
-    $("#nextDay").addEventListener("click", () => showIndex(currentIndex - 1));
-    $("#latestBtn").addEventListener("click", () => showIndex(0));
+    // ---- UI wiring -------------------------------------------------------
+    // Isolated from data loading on purpose. A control that has been removed
+    // from index.html (or a stale cached script.js referencing one) degrades to
+    // a console warning instead of blanking the entire board.
+    try {
+      on("#archiveSelect", "change", (e) => showIndex(Number(e.target.value)));
+      on("#prevDay", "click", () => showIndex(currentIndex + 1));
+      on("#nextDay", "click", () => showIndex(currentIndex - 1));
+      on("#latestBtn", "click", () => showIndex(0));
 
-    const input = $("#searchInput");
-    input.addEventListener("input", (e) => { QUERY = e.target.value; applyFilter(); });
-    input.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") { input.value = ""; QUERY = ""; applyFilter(); input.blur(); }
-    });
-    $("#searchClear").addEventListener("click", () => {
-      input.value = ""; QUERY = ""; applyFilter(); input.focus();
-    });
+      const input = el("#searchInput");
+      if (input) {
+        input.addEventListener("input", (e) => { QUERY = e.target.value; applyFilter(); });
+        input.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            input.value = ""; QUERY = ""; applyFilter(); input.blur();
+          }
+        });
+      }
+      on("#searchClear", "click", () => {
+        if (!input) return;
+        input.value = ""; QUERY = ""; applyFilter(); input.focus();
+      });
 
-    // score threshold
-    const range = $("#scoreRange");
-    range.value = String(MIN_SCORE);
-    range.addEventListener("input", (e) => {
-      MIN_SCORE = Number(e.target.value) || 0;
-      savePrefs({ minScore: MIN_SCORE });
-      applyFilter();
-    });
-    $("#scoreReset").addEventListener("click", () => {
-      MIN_SCORE = 0; savePrefs({ minScore: 0 }); applyFilter();
-    });
+      // score threshold
+      setProp("#scoreRange", "value", String(MIN_SCORE));
+      on("#scoreRange", "input", (e) => {
+        MIN_SCORE = Number(e.target.value) || 0;
+        savePrefs({ minScore: MIN_SCORE });
+        applyFilter();
+      });
+      on("#scoreReset", "click", () => {
+        MIN_SCORE = 0; savePrefs({ minScore: 0 }); applyFilter();
+      });
 
-    // category collapse — ONE delegated listener on the board. Survives every
-    // re-render (filter, score, day-flip, auto-refresh) because it is bound to
-    // the container, not to buttons that get destroyed and rebuilt.
-    board.addEventListener("click", (e) => {
-      const btn = e.target.closest && e.target.closest("[data-cat-toggle]");
-      if (btn && board.contains(btn)) toggleCategory(btn.dataset.catToggle);
-    });
-    $("#collapseAll").addEventListener("click", () => setAllCategories(true));
-    $("#expandAll").addEventListener("click", () => setAllCategories(false));
+      // category collapse — ONE delegated listener on the board. Survives every
+      // re-render (filter, score, day-flip) because it is bound to the
+      // container, not to buttons that get destroyed and rebuilt.
+      board.addEventListener("click", (e) => {
+        const btn = e.target.closest && e.target.closest("[data-cat-toggle]");
+        if (btn && board.contains(btn)) toggleCategory(btn.dataset.catToggle);
+      });
+      on("#collapseAll", "click", (e) => { e.preventDefault(); setAllCategories(true); });
+      on("#expandAll", "click", (e) => { e.preventDefault(); setAllCategories(false); });
 
-    // leaderboard controls
-    $$("#boardBody [data-sort]").forEach((btn) => {
-      btn.classList.toggle("is-on", btn.dataset.sort === LB_SORT);
-      btn.addEventListener("click", () => {
-        LB_SORT = btn.dataset.sort;
-        $$("#boardBody [data-sort]").forEach((b) =>
-          b.classList.toggle("is-on", b === btn));
-        savePrefs({ lbSort: LB_SORT });
+      // leaderboard controls
+      $$("#boardBody [data-sort]").forEach((btn) => {
+        btn.classList.toggle("is-on", btn.dataset.sort === LB_SORT);
+        btn.addEventListener("click", () => {
+          LB_SORT = btn.dataset.sort;
+          $$("#boardBody [data-sort]").forEach((b) =>
+            b.classList.toggle("is-on", b === btn));
+          savePrefs({ lbSort: LB_SORT });
+          renderLeaderboard();
+        });
+      });
+      setProp("#lbAllDays", "checked", LB_ALL_DAYS);
+      on("#lbAllDays", "change", (e) => {
+        LB_ALL_DAYS = e.target.checked;
+        savePrefs({ lbAllDays: LB_ALL_DAYS });
         renderLeaderboard();
       });
-    });
-    const lbAll = $("#lbAllDays");
-    lbAll.checked = LB_ALL_DAYS;
-    lbAll.addEventListener("change", (e) => {
-      LB_ALL_DAYS = e.target.checked;
-      savePrefs({ lbAllDays: LB_ALL_DAYS });
-      renderLeaderboard();
-    });
 
-    // diff controls
-    $("#diffSelect").addEventListener("change", (e) => {
-      DIFF_AGAINST = e.target.value; renderDiff();
-    });
+      // diff controls
+      on("#diffSelect", "change", (e) => { DIFF_AGAINST = e.target.value; renderDiff(); });
 
-    // panel toggles
-    [["#healthToggle", "#healthBody"], ["#boardToggle", "#boardBody"],
-     ["#diffToggle", "#diffBody"]].forEach(([t, b]) => {
-      const toggle = $(t), body = $(b);
-      toggle.addEventListener("click", () => {
-        const open = toggle.getAttribute("aria-expanded") === "true";
-        toggle.setAttribute("aria-expanded", String(!open));
-        body.hidden = open;
+      // panel toggles
+      [["#healthToggle", "#healthBody"], ["#boardToggle", "#boardBody"],
+       ["#diffToggle", "#diffBody"]].forEach(([t, b]) => {
+        const toggle = el(t), body = el(b);
+        if (!toggle || !body) return;
+        toggle.addEventListener("click", () => {
+          const open = toggle.getAttribute("aria-expanded") === "true";
+          toggle.setAttribute("aria-expanded", String(!open));
+          body.hidden = open;
+        });
       });
-    });
 
-    // keyboard: "/" focus filter, j/k days, c collapse-all, e expand-all
-    document.addEventListener("keydown", (e) => {
-      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName);
-      if (e.key === "/" && !typing) { e.preventDefault(); input.focus(); return; }
-      if (typing) return;
-      if (e.key === "j") showIndex(currentIndex + 1);
-      else if (e.key === "k") showIndex(currentIndex - 1);
-      else if (e.key === "c") $("#collapseAll").click();
-      else if (e.key === "e") $("#expandAll").click();
-    });
+      // keyboard: "/" filter, j/k days, c/e collapse-expand
+      document.addEventListener("keydown", (e) => {
+        const ae = document.activeElement;
+        const typing = !!ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
+        if (e.key === "/" && !typing) {
+          e.preventDefault(); if (input) input.focus(); return;
+        }
+        if (typing) return;
+        if (e.key === "j") showIndex(currentIndex + 1);
+        else if (e.key === "k") showIndex(currentIndex - 1);
+        else if (e.key === "c") setAllCategories(true);
+        else if (e.key === "e") setAllCategories(false);
+      });
+
+      if (MISSING.length) {
+        console.warn("[DISPATCH] markup missing for:", MISSING.join(", "),
+                     "\n  script.js build:", BUILD,
+                     "\n  index.html build:", document.body.dataset.build || "(none)",
+                     "\n  If those two differ, one file is stale — hard-reload " +
+                     "(Cmd/Ctrl+Shift+R) or wait for the Pages CDN to refresh.");
+      }
+    } catch (wiringErr) {
+      // Never let a control failure hide a briefing that loaded correctly.
+      console.error("[DISPATCH] UI wiring failed:", wiringErr);
+    }
 
     showIndex(0);
   } catch (e) {
