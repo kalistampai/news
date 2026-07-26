@@ -27,7 +27,7 @@ const CONFIG = {
    <body data-build>. A mismatch means one of the two files is stale — usually a
    cached script.js on GitHub Pages — which is exactly how a removed control ends
    up referenced by old code and throws "Cannot set properties of null". */
-const BUILD = "2026-07-22h";
+const BUILD = "2026-07-26a";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -76,6 +76,7 @@ let COLLAPSED = new Set();// category names collapsed by the user
 let LB_SORT = "features"; // leaderboard sort key
 let LB_ALL_DAYS = false;  // leaderboard scope
 let DIFF_AGAINST = null;  // date the diff panel compares to
+let ACTIVE_TAB = "all";   // category tab; "all" shows every section
 
 /* ------------------------------ preferences ------------------------------ */
 /* This is a real static site (not a sandboxed artifact), so localStorage is
@@ -198,6 +199,69 @@ async function buildStore(gist) {
   return { dates, byDate, reports };
 }
 
+/* ---------------------------------- tabs ---------------------------------- */
+/* Canonical running order, mirroring prompts/editor.txt. Categories the editor
+   emits that are not in this list (e.g. the "Unsorted" degraded bucket) sort to
+   the end alphabetically rather than being dropped. */
+const CATEGORY_ORDER = [
+  "Offensive Security", "OSINT & Recon", "Hardware & SDR", "AI News", "AI / ML",
+  "Linux & Homelab", "Finance", "DIY & Self-Reliance",
+];
+
+function orderCategories(names) {
+  const rank = (n) => {
+    const i = CATEGORY_ORDER.indexOf(n);
+    return i === -1 ? CATEGORY_ORDER.length : i;
+  };
+  return [...names].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+}
+
+/* Tabs are built from the day's UNFILTERED data so the bar does not reshuffle
+   while you type in the search box; counts reflect the active search/score
+   filter so an empty tab is visibly empty before you click it. */
+function renderTabs(dayData, filteredCats) {
+  const bar = el("#tabBar");
+  const cats = (dayData && dayData.categories) || {};
+  const names = orderCategories(
+    Object.keys(cats).filter((k) => (cats[k] || []).length));
+
+  if (names.length < 2) {                 // nothing to switch between
+    bar.hidden = true;
+    bar.innerHTML = "";
+    return;
+  }
+  bar.hidden = false;
+
+  if (ACTIVE_TAB !== "all" && !names.includes(ACTIVE_TAB)) ACTIVE_TAB = "all";
+
+  const countOf = (n) => (filteredCats && filteredCats[n] ? filteredCats[n].length : 0);
+  const totalShown = names.reduce((s, n) => s + countOf(n), 0);
+
+  const tab = (key, label, count) => {
+    const on = ACTIVE_TAB === key;
+    return `<button type="button" class="tab${on ? " is-on" : ""}" ` +
+      `data-tab="${escapeHtml(key)}" role="tab" aria-selected="${on}"` +
+      `${count === 0 ? ' data-empty="true"' : ""}>` +
+      `<span class="tab__label">${escapeHtml(label)}</span>` +
+      `<span class="tab__count">${count}</span></button>`;
+  };
+
+  bar.innerHTML =
+    `<span class="tab__lead">// sections</span>` +
+    tab("all", "All", totalShown) +
+    names.map((n) => tab(n, n, countOf(n))).join("");
+}
+
+function setActiveTab(key) {
+  ACTIVE_TAB = key || "all";
+  savePrefs({ activeTab: ACTIVE_TAB });
+  applyFilter();
+  const board = el("#board");
+  if (board && board.scrollIntoView) {
+    board.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
 /* -------------------------- filtering (search + score) -------------------- */
 /* Multi-term AND matching. "cve linux" matches items containing BOTH, in any
    field. Purely client-side over the already-loaded day — no extra requests. */
@@ -234,22 +298,24 @@ function scoreOf(item) {
 
    Briefings archived BEFORE that change have no score on notable items. Those
    are reported separately as `legacyNote` rather than silently kept or dropped. */
-function filterBriefing(data, query, minScore) {
+function filterBriefing(data, query, minScore, ignoreTab = false) {
   const toks = tokens(query);
   const cats = data.categories || {};
   const notable = data.also_notable || [];
   const totalFeat = Object.values(cats).reduce((n, v) => n + (v?.length || 0), 0);
   const totalNote = notable.length;
-  const active = toks.length > 0 || minScore > 0;
+  const tabbed = !ignoreTab && ACTIVE_TAB !== "all";
+  const active = toks.length > 0 || minScore > 0 || tabbed;
 
   if (!active) {
-    return { data, active: false, scoreActive: false, legacyNote: 0,
+    return { data, active: false, scoreActive: false, legacyNote: 0, tabbed: false,
              totalFeat, totalNote, matchFeat: totalFeat, matchNote: totalNote };
   }
 
   const outCats = {};
   let matchFeat = 0;
   for (const [name, items] of Object.entries(cats)) {
+    if (tabbed && name !== ACTIVE_TAB) continue;   // tab narrows to one section
     const keep = (items || []).filter((it) => {
       const s = scoreOf(it);
       return (s === null || s >= minScore) &&
@@ -259,7 +325,10 @@ function filterBriefing(data, query, minScore) {
   }
 
   let legacyNote = 0;
-  const outNote = notable.filter((it) => {
+  // also_notable carries no category, so a section tab cannot meaningfully
+  // filter it. Hide the strip while a tab is active rather than showing items
+  // that belong to other sections.
+  const outNote = tabbed ? [] : notable.filter((it) => {
     if (toks.length && !matchesAll(notableHaystack(it), toks)) return false;
     if (minScore <= 0) return true;
     const s = scoreOf(it);
@@ -269,8 +338,8 @@ function filterBriefing(data, query, minScore) {
 
   return {
     data: { ...data, categories: outCats, also_notable: outNote },
-    active: true, scoreActive: minScore > 0, legacyNote, totalFeat, totalNote,
-    matchFeat, matchNote: outNote.length,
+    active: true, scoreActive: minScore > 0, tabbed, legacyNote,
+    totalFeat, totalNote, matchFeat, matchNote: outNote.length,
   };
 }
 
@@ -297,6 +366,11 @@ function applyFilter() {
   if (!dates.length) return;
   const data = STORE.byDate[dates[currentIndex]];
   const res = filterBriefing(data, QUERY, MIN_SCORE);
+  // Counts come from a tab-agnostic pass so every tab shows its true size even
+  // while another tab is selected.
+  const forCounts = filterBriefing(
+    data, QUERY, MIN_SCORE, /* ignoreTab */ true).data.categories;
+  renderTabs(data, forCounts);
   render(res.data, res);
   syncSearchUI(res);
   syncScoreUI();
@@ -890,7 +964,8 @@ function renderNotable(items) {
 function render(data, filterRes) {
   board.innerHTML = "";
   const cats = data.categories || {};
-  const catNames = Object.keys(cats).filter((k) => cats[k]?.length);
+  const catNames = orderCategories(
+    Object.keys(cats).filter((k) => cats[k]?.length));
   let featTotal = 0;
 
   catNames.forEach((name) => {
@@ -902,20 +977,29 @@ function render(data, filterRes) {
   if (notable.length) board.appendChild(renderNotable(notable));
 
   if (!catNames.length && !notable.length) {
-    const why = filterRes && filterRes.scoreActive && !tokens(QUERY).length
-      ? `No items scored ≥ ${MIN_SCORE}.`
-      : filterRes && filterRes.active
-        ? `No items match <b>${escapeHtml(QUERY)}</b>${
-            filterRes.scoreActive ? ` at score ≥ ${MIN_SCORE}` : ""}.`
-        : "No items in this briefing.";
-    board.innerHTML = filterRes && filterRes.active
+    const res = filterRes || {};
+    const where = res.tabbed ? ` in <b>${escapeHtml(ACTIVE_TAB)}</b>` : "";
+    let why;
+    if (tokens(QUERY).length) {
+      why = `No items match <b>${escapeHtml(QUERY)}</b>` +
+            (res.scoreActive ? ` at score ≥ ${MIN_SCORE}` : "") + `${where}.`;
+    } else if (res.scoreActive) {
+      why = `No items scored ≥ ${MIN_SCORE}${where}.`;
+    } else if (res.tabbed) {
+      why = `Nothing in <b>${escapeHtml(ACTIVE_TAB)}</b> today.`;
+    } else {
+      why = "No items in this briefing.";
+    }
+    board.innerHTML = res.active
       ? `<div class="state">${why}
            <button class="state__reset" id="stateReset">clear filters</button></div>`
       : `<div class="state">${why}</div>`;
     const reset = el("#stateReset");
-    if (reset) reset.addEventListener("click", () => {
-      el("#searchInput").value = ""; QUERY = ""; MIN_SCORE = 0;
-      savePrefs({ minScore: 0 }); applyFilter();
+    if (reset && reset.addEventListener) reset.addEventListener("click", () => {
+      const si = el("#searchInput"); if (si) si.value = "";
+      QUERY = ""; MIN_SCORE = 0; ACTIVE_TAB = "all";
+      savePrefs({ minScore: 0, activeTab: "all" });
+      applyFilter();
     });
   }
 
@@ -998,6 +1082,7 @@ function checkAssetVersions() {
   COLLAPSED = new Set(Array.isArray(prefs.collapsed) ? prefs.collapsed : []);
   LB_SORT = LB_SORTS[prefs.lbSort] ? prefs.lbSort : "features";
   LB_ALL_DAYS = !!prefs.lbAllDays;
+  ACTIVE_TAB = typeof prefs.activeTab === "string" ? prefs.activeTab : "all";
 
   try {
     const gist = await fetchGist();
@@ -1056,6 +1141,15 @@ function checkAssetVersions() {
           toggleCategory(btn.dataset.catToggle);
         }
       });
+      // Tab bar — ONE delegated listener; the bar is rebuilt on every render.
+      const tabBar = el("#tabBar");
+      if (tabBar && tabBar.addEventListener) {
+        tabBar.addEventListener("click", (e) => {
+          const btn = e.target.closest && e.target.closest("[data-tab]");
+          if (btn && tabBar.contains(btn)) setActiveTab(btn.dataset.tab);
+        });
+      }
+
       on("#collapseAll", "click", (e) => { e.preventDefault(); setAllCategories(true); });
       on("#expandAll", "click", (e) => { e.preventDefault(); setAllCategories(false); });
 
@@ -1107,6 +1201,15 @@ function checkAssetVersions() {
         else if (e.key === "k") showIndex(currentIndex - 1);
         else if (e.key === "c") setAllCategories(true);
         else if (e.key === "e") setAllCategories(false);
+        else if (e.key === "[" || e.key === "]") {
+          const keys = ["all", ...orderCategories(Object.keys(
+            (STORE.byDate[STORE.dates[currentIndex]] || {}).categories || {}))];
+          const i = keys.indexOf(ACTIVE_TAB);
+          const next = e.key === "]"
+            ? keys[(i + 1) % keys.length]
+            : keys[(i - 1 + keys.length) % keys.length];
+          setActiveTab(next);
+        }
       });
 
       if (MISSING.length) {
