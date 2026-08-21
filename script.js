@@ -6,9 +6,8 @@
 
 /* ====================== CONFIG — EDIT THE TWO SUPABASE VALUES ============== */
 const CONFIG = {
+  // Your project's REST endpoint, from Supabase -> Project Settings -> API.
   SUPABASE_URL: "https://baiojghilzxhkebfblzv.supabase.co",
-  SUPABASE_ANON_KEY: "sb_publishable_nfLVr5Krdld9pxxr4f2CYQ_bsn0TNxx",
-};
 
   // The ANON (publishable) key — NOT the service_role key.
   //
@@ -25,7 +24,7 @@ const CONFIG = {
   //
   // The service_role key bypasses RLS. It belongs in GitHub Actions secrets for
   // the pipeline, and must never appear in this file.
-  SUPABASE_ANON_KEY: "PUT_YOUR_ANON_KEY_HERE",
+  SUPABASE_ANON_KEY: "sb_publishable_nfLVr5Krdld9pxxr4f2CYQ_bsn0TNxx",
 
   // Days of archive to pull on load. The pipeline prunes at ARCHIVE_KEEP_DAYS
   // (30), so this only needs to match it.
